@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import {
   ShieldCheck,
   AlertTriangle,
@@ -38,9 +38,13 @@ import {
   Check,
   Smartphone,
   ChevronDown,
+  Camera,
+  Video,
+  Volume2,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import confetti from "canvas-confetti";
+import { CameraHUD, SITE_PRESETS, PresetSite } from "@/components/CameraHUD";
 import { WorkOrderPrintModal } from "@/components/WorkOrderPrintModal";
 import { PartnerStackModal, PartnerKey } from "@/components/PartnerStackModal";
 import { ExpoCompanionModal } from "@/components/ExpoCompanionModal";
@@ -51,7 +55,7 @@ export default function Home() {
   // Navigation & Viewport State
   const [activeNavTab, setActiveNavTab] = useState<string>("Dashboard");
   const [activeLeftTab, setActiveLeftTab] = useState<string>("AI Analysis");
-  const [viewportMode, setViewportMode] = useState<"satellite" | "map" | "terrain">("satellite");
+  const [viewportMode, setViewportMode] = useState<"camera" | "satellite" | "map" | "terrain">("camera");
   const [logFilter, setLogFilter] = useState<string>("All Logs");
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
@@ -90,6 +94,74 @@ export default function Home() {
     fallbackTriggered: false,
     latencyMs: 742,
   });
+
+  // Right Column Live Webcam State & Ref
+  const rightVideoRef = useRef<HTMLVideoElement>(null);
+  const rightStreamRef = useRef<MediaStream | null>(null);
+  const [isRightWebcamActive, setIsRightWebcamActive] = useState<boolean>(false);
+  const [webcamNotice, setWebcamNotice] = useState<string | null>(null);
+
+  // Start / Toggle Webcam on Right Column
+  const toggleRightWebcam = async () => {
+    if (isRightWebcamActive) {
+      if (rightStreamRef.current) {
+        rightStreamRef.current.getTracks().forEach((track) => track.stop());
+        rightStreamRef.current = null;
+      }
+      if (rightVideoRef.current) {
+        rightVideoRef.current.srcObject = null;
+      }
+      setIsRightWebcamActive(false);
+      setWebcamNotice(null);
+    } else {
+      try {
+        setWebcamNotice("Requesting camera access...");
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } },
+          audio: false,
+        });
+        rightStreamRef.current = stream;
+        if (rightVideoRef.current) {
+          rightVideoRef.current.srcObject = stream;
+          rightVideoRef.current.play();
+        }
+        setIsRightWebcamActive(true);
+        setWebcamNotice("Live optical stream connected.");
+      } catch (err: any) {
+        console.warn("Webcam access error:", err);
+        setWebcamNotice("Camera permission denied. High-definition construction stream active.");
+        setIsRightWebcamActive(false);
+      }
+    }
+  };
+
+  // Capture Snapshot from the Right Video Stream
+  const captureRightSnapshot = () => {
+    if (rightVideoRef.current) {
+      const canvas = document.createElement("canvas");
+      canvas.width = rightVideoRef.current.videoWidth || 640;
+      canvas.height = rightVideoRef.current.videoHeight || 360;
+      const ctx = canvas.getContext("2d");
+      if (ctx) {
+        ctx.drawImage(rightVideoRef.current, 0, 0, canvas.width, canvas.height);
+        const base64 = canvas.toDataURL("image/jpeg", 0.85);
+        handleScan({
+          image: base64,
+          zoneName: currentInspection.zone,
+          voiceNotes: "Live webcam snapshot captured from auxiliary feed CAM-01.",
+          presetId: "webcam_snapshot",
+        });
+      }
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      if (rightStreamRef.current) {
+        rightStreamRef.current.getTracks().forEach((track) => track.stop());
+      }
+    };
+  }, []);
 
   // Mission Logs Data
   const missionLogs = [
@@ -157,6 +229,39 @@ export default function Home() {
         origin: { y: 0.6 },
       });
     }, 900);
+  };
+
+  // Scan handler
+  const handleScan = async (payload: {
+    image: string;
+    zoneName: string;
+    voiceNotes: string;
+    presetId: string;
+  }) => {
+    setIsAnalyzing(true);
+    try {
+      const response = await fetch("/api/inspect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          image: payload.image,
+          zoneName: payload.zoneName,
+          userVoiceNotes: payload.voiceNotes,
+          selectedPresetId: payload.presetId,
+          role: currentRole,
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setCurrentInspection(data);
+      }
+      confetti({ particleCount: 70, spread: 60, origin: { y: 0.7 } });
+    } catch (err) {
+      console.warn("Scan failed, fallback preserved.", err);
+    } finally {
+      setIsAnalyzing(false);
+    }
   };
 
   return (
@@ -383,18 +488,15 @@ export default function Home() {
                   </linearGradient>
                 </defs>
                 <rect width="240" height="120" fill="url(#cyberSky)" />
-                {/* Cyberpunk City Silhouette */}
                 <rect x="20" y="60" width="25" height="60" fill="#0f172a" />
                 <rect x="50" y="40" width="35" height="80" fill="#1e293b" />
                 <rect x="90" y="25" width="40" height="95" fill="#0f172a" />
                 <rect x="135" y="50" width="30" height="70" fill="#1e293b" />
                 <rect x="170" y="35" width="45" height="85" fill="#0f172a" />
-                {/* Glowing Windows */}
                 <circle cx="65" cy="55" r="1.5" fill="#06b6d4" />
                 <circle cx="75" cy="70" r="1.5" fill="#06b6d4" />
                 <circle cx="105" cy="40" r="1.5" fill="#38bdf8" />
                 <circle cx="115" cy="55" r="1.5" fill="#38bdf8" />
-                {/* Glowing Drone Mesh */}
                 <circle cx="120" cy="30" r="14" fill="none" stroke="#06b6d4" strokeWidth="1" strokeDasharray="3,2" />
                 <circle cx="120" cy="30" r="2.5" fill="#06b6d4" />
                 <line x1="120" y1="30" x2="60" y2="85" stroke="#06b6d4" strokeWidth="0.8" opacity="0.4" />
@@ -493,7 +595,6 @@ export default function Home() {
             <div className="col-span-2 sm:col-span-1 p-2.5 rounded-xl bg-slate-900/80 border border-slate-800/90 shadow flex flex-col items-center justify-center text-center">
               <div className="relative w-14 h-14 flex items-center justify-center">
                 <svg className="w-full h-full -rotate-90" viewBox="0 0 36 36">
-                  {/* Gauge Background Ring */}
                   <path
                     className="text-slate-800"
                     strokeWidth="3.5"
@@ -501,7 +602,6 @@ export default function Home() {
                     fill="none"
                     d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
                   />
-                  {/* Gauge Progress Ring (0.27) */}
                   <path
                     className="text-cyan-400"
                     strokeDasharray="27, 100"
@@ -522,13 +622,24 @@ export default function Home() {
           <div className="rounded-2xl bg-slate-900/80 backdrop-blur-xl border border-slate-800/90 shadow-2xl overflow-hidden flex flex-col">
             {/* Viewport Top Bar */}
             <div className="px-4 py-2.5 bg-slate-950/80 border-b border-slate-800/80 flex items-center justify-between">
-              {/* Left View Toggles */}
+              {/* Left View Toggles (Including active Camera HUD Tab!) */}
               <div className="flex items-center space-x-1 bg-slate-900 p-0.5 rounded-lg border border-slate-800 text-xs">
+                <button
+                  onClick={() => setViewportMode("camera")}
+                  className={`flex items-center space-x-1 px-3 py-1 rounded transition-colors ${
+                    viewportMode === "camera"
+                      ? "bg-cyan-500 text-slate-950 font-bold shadow"
+                      : "text-slate-400 hover:text-white"
+                  }`}
+                >
+                  <Camera className="w-3 h-3" />
+                  <span>📷 Camera HUD</span>
+                </button>
                 <button
                   onClick={() => setViewportMode("satellite")}
                   className={`px-3 py-1 rounded transition-colors ${
                     viewportMode === "satellite"
-                      ? "bg-cyan-500 text-slate-950 font-bold"
+                      ? "bg-cyan-500 text-slate-950 font-bold shadow"
                       : "text-slate-400 hover:text-white"
                   }`}
                 >
@@ -538,7 +649,7 @@ export default function Home() {
                   onClick={() => setViewportMode("map")}
                   className={`px-3 py-1 rounded transition-colors ${
                     viewportMode === "map"
-                      ? "bg-cyan-500 text-slate-950 font-bold"
+                      ? "bg-cyan-500 text-slate-950 font-bold shadow"
                       : "text-slate-400 hover:text-white"
                   }`}
                 >
@@ -548,7 +659,7 @@ export default function Home() {
                   onClick={() => setViewportMode("terrain")}
                   className={`px-3 py-1 rounded transition-colors ${
                     viewportMode === "terrain"
-                      ? "bg-cyan-500 text-slate-950 font-bold"
+                      ? "bg-cyan-500 text-slate-950 font-bold shadow"
                       : "text-slate-400 hover:text-white"
                   }`}
                 >
@@ -582,150 +693,157 @@ export default function Home() {
               </div>
             </div>
 
-            {/* Tactical Map View Canvas (Self-contained High-Resolution Graphic) */}
-            <div className="relative h-[340px] sm:h-[400px] w-full bg-[#08111e] overflow-hidden select-none">
-              <svg className="w-full h-full" viewBox="0 0 1000 500" preserveAspectRatio="xMidYMid slice">
-                <defs>
-                  {/* Hatched Pattern for Restricted Danger Zone */}
-                  <pattern
-                    id="diagonalDangerHatch"
-                    width="12"
-                    height="12"
-                    patternTransform="rotate(45 0 0)"
-                    patternUnits="userSpaceOnUse"
-                  >
-                    <line x1="0" y1="0" x2="0" y2="12" stroke="#ef4444" strokeWidth="2.5" opacity="0.65" />
-                  </pattern>
-
-                  {/* Blueprint Grid Lines */}
-                  <pattern id="tacticalGrid" width="40" height="40" patternUnits="userSpaceOnUse">
-                    <line x1="0" y1="0" x2="40" y2="0" stroke="#06b6d4" strokeWidth="0.5" opacity="0.15" />
-                    <line x1="0" y1="0" x2="0" y2="40" stroke="#06b6d4" strokeWidth="0.5" opacity="0.15" />
-                  </pattern>
-
-                  {/* Aerial Terrain Base Filter */}
-                  <radialGradient id="satelliteGlow" cx="50%" cy="50%" r="50%">
-                    <stop offset="0%" stopColor="#0f213d" />
-                    <stop offset="100%" stopColor="#060c16" />
-                  </radialGradient>
-                </defs>
-
-                {/* Satellite Background Plate */}
-                <rect width="1000" height="500" fill="url(#satelliteGlow)" />
-                <rect width="1000" height="500" fill="url(#tacticalGrid)" />
-
-                {/* Structural Concrete Footprint Outline */}
-                <rect
-                  x="140"
-                  y="80"
-                  width="720"
-                  height="340"
-                  fill="#0c1729"
-                  stroke="#1e3a5f"
-                  strokeWidth="2"
-                  rx="6"
-                  opacity="0.8"
+            {/* Viewport Content: Switches seamlessly between Camera HUD and Tactical Map */}
+            {viewportMode === "camera" ? (
+              /* ACTIVE FULL-SIZE CAMERA HUD VIEWPORT */
+              <div className="w-full">
+                <CameraHUD
+                  onScan={handleScan}
+                  onPresetChange={(preset) => {
+                    setCurrentInspection((prev) => ({
+                      ...prev,
+                      zone: preset.zone,
+                      severity: preset.defaultSeverity,
+                    }));
+                  }}
+                  isAnalyzing={isAnalyzing}
+                  activeZone={currentInspection.zone}
                 />
+              </div>
+            ) : (
+              /* TACTICAL SATELLITE / MAP CANVAS */
+              <div className="relative h-[340px] sm:h-[400px] w-full bg-[#08111e] overflow-hidden select-none">
+                <svg className="w-full h-full" viewBox="0 0 1000 500" preserveAspectRatio="xMidYMid slice">
+                  <defs>
+                    <pattern
+                      id="diagonalDangerHatch"
+                      width="12"
+                      height="12"
+                      patternTransform="rotate(45 0 0)"
+                      patternUnits="userSpaceOnUse"
+                    >
+                      <line x1="0" y1="0" x2="0" y2="12" stroke="#ef4444" strokeWidth="2.5" opacity="0.65" />
+                    </pattern>
+                    <pattern id="tacticalGrid" width="40" height="40" patternUnits="userSpaceOnUse">
+                      <line x1="0" y1="0" x2="40" y2="0" stroke="#06b6d4" strokeWidth="0.5" opacity="0.15" />
+                      <line x1="0" y1="0" x2="0" y2="40" stroke="#06b6d4" strokeWidth="0.5" opacity="0.15" />
+                    </pattern>
+                    <radialGradient id="satelliteGlow" cx="50%" cy="50%" r="50%">
+                      <stop offset="0%" stopColor="#0f213d" />
+                      <stop offset="100%" stopColor="#060c16" />
+                    </radialGradient>
+                  </defs>
 
-                {/* Sub-Grade Footing Foundation Beams */}
-                <line x1="140" y1="250" x2="860" y2="250" stroke="#1e3a5f" strokeWidth="3" strokeDasharray="8,6" />
-                <line x1="420" y1="80" x2="420" y2="420" stroke="#1e3a5f" strokeWidth="3" strokeDasharray="8,6" />
-                <line x1="680" y1="80" x2="680" y2="420" stroke="#1e3a5f" strokeWidth="3" strokeDasharray="8,6" />
+                  <rect width="1000" height="500" fill="url(#satelliteGlow)" />
+                  <rect width="1000" height="500" fill="url(#tacticalGrid)" />
 
-                {/* HATCHED RED DANGER POLYGON: NO-INSPECTION / SHEAR CRACK ZONE */}
-                <polygon
-                  points="260,140 450,140 490,260 290,290"
-                  fill="url(#diagonalDangerHatch)"
-                  stroke="#ef4444"
-                  strokeWidth="2"
-                />
-                <rect x="270" y="150" width="180" height="22" fill="#0b1120" rx="3" opacity="0.9" />
-                <text x="278" y="165" fill="#f87171" fontSize="10" fontWeight="bold" fontFamily="monospace">
-                  RESTRICTED SHEAR ZONE (CSA)
-                </text>
+                  <rect
+                    x="140"
+                    y="80"
+                    width="720"
+                    height="340"
+                    fill="#0c1729"
+                    stroke="#1e3a5f"
+                    strokeWidth="2"
+                    rx="6"
+                    opacity="0.8"
+                  />
 
-                {/* FLIGHT / SCAN PATH: Cyan Dashed Line */}
-                <path
-                  d="M 180,360 L 320,340 L 520,380 L 720,320 L 800,180 L 640,160 L 520,220"
-                  stroke="#06b6d4"
-                  strokeWidth="2.5"
-                  strokeDasharray="6,4"
-                  fill="none"
-                />
+                  <line x1="140" y1="250" x2="860" y2="250" stroke="#1e3a5f" strokeWidth="3" strokeDasharray="8,6" />
+                  <line x1="420" y1="80" x2="420" y2="420" stroke="#1e3a5f" strokeWidth="3" strokeDasharray="8,6" />
+                  <line x1="680" y1="80" x2="680" y2="420" stroke="#1e3a5f" strokeWidth="3" strokeDasharray="8,6" />
 
-                {/* Waypoints */}
-                <circle cx="180" cy="360" r="4" fill="#06b6d4" />
-                <text x="175" y="380" fill="#38bdf8" fontSize="9" fontFamily="monospace">WP-01</text>
-
-                <circle cx="320" cy="340" r="4" fill="#06b6d4" />
-                <text x="315" y="360" fill="#38bdf8" fontSize="9" fontFamily="monospace">WP-02</text>
-
-                <circle cx="520" cy="380" r="4" fill="#06b6d4" />
-                <text x="515" y="400" fill="#38bdf8" fontSize="9" fontFamily="monospace">WP-03</text>
-
-                <circle cx="720" cy="320" r="4" fill="#06b6d4" />
-                <text x="715" y="340" fill="#38bdf8" fontSize="9" fontFamily="monospace">WP-04</text>
-
-                {/* POI Markers */}
-                <g transform="translate(790, 170)">
-                  <circle cx="10" cy="10" r="14" fill="#3b82f6" opacity="0.25" />
-                  <circle cx="10" cy="10" r="6" fill="#3b82f6" />
-                  <text x="24" y="14" fill="#93c5fd" fontSize="10" fontWeight="bold" fontFamily="monospace">
-                    POI-A: Water Sump
+                  {/* Restricted Hazard Polygon */}
+                  <polygon
+                    points="260,140 450,140 490,260 290,290"
+                    fill="url(#diagonalDangerHatch)"
+                    stroke="#ef4444"
+                    strokeWidth="2"
+                  />
+                  <rect x="270" y="150" width="180" height="22" fill="#0b1120" rx="3" opacity="0.9" />
+                  <text x="278" y="165" fill="#f87171" fontSize="10" fontWeight="bold" fontFamily="monospace">
+                    RESTRICTED SHEAR ZONE (CSA)
                   </text>
-                </g>
 
-                <g transform="translate(630, 150)">
-                  <circle cx="10" cy="10" r="14" fill="#f59e0b" opacity="0.25" />
-                  <circle cx="10" cy="10" r="6" fill="#f59e0b" />
-                  <text x="24" y="14" fill="#fde68a" fontSize="10" fontWeight="bold" fontFamily="monospace">
-                    POI-B: 600V Vault
-                  </text>
-                </g>
+                  {/* Flight Path */}
+                  <path
+                    d="M 180,360 L 320,340 L 520,380 L 720,320 L 800,180 L 640,160 L 520,220"
+                    stroke="#06b6d4"
+                    strokeWidth="2.5"
+                    strokeDasharray="6,4"
+                    fill="none"
+                  />
 
-                {/* SCANNER DRONE: SCANNER-017 with Concentric Pulse Circles */}
-                <g transform="translate(520, 220)">
-                  <circle cx="0" cy="0" r="32" fill="none" stroke="#10b981" strokeWidth="1" strokeDasharray="3,3" opacity="0.4" />
-                  <circle cx="0" cy="0" r="18" fill="none" stroke="#10b981" strokeWidth="1.5" opacity="0.7" />
-                  <circle cx="0" cy="0" r="6" fill="#10b981" />
-                  <rect x="12" y="-12" width="94" height="20" fill="#060c18" rx="4" stroke="#10b981" strokeWidth="1" />
-                  <text x="18" y="2" fill="#34d399" fontSize="9" fontWeight="bold" fontFamily="monospace">
-                    SCANNER-017
-                  </text>
-                </g>
-              </svg>
+                  <circle cx="180" cy="360" r="4" fill="#06b6d4" />
+                  <text x="175" y="380" fill="#38bdf8" fontSize="9" fontFamily="monospace">WP-01</text>
+                  <circle cx="320" cy="340" r="4" fill="#06b6d4" />
+                  <text x="315" y="360" fill="#38bdf8" fontSize="9" fontFamily="monospace">WP-02</text>
+                  <circle cx="520" cy="380" r="4" fill="#06b6d4" />
+                  <text x="515" y="400" fill="#38bdf8" fontSize="9" fontFamily="monospace">WP-03</text>
+                  <circle cx="720" cy="320" r="4" fill="#06b6d4" />
+                  <text x="715" y="340" fill="#38bdf8" fontSize="9" fontFamily="monospace">WP-04</text>
 
-              {/* Compass Rose (Top Right) */}
-              <div className="absolute top-4 right-4 bg-slate-950/80 border border-slate-800 p-2 rounded-xl text-center backdrop-blur">
-                <div className="w-8 h-8 relative flex items-center justify-center">
-                  <span className="absolute top-0 text-[9px] font-black text-cyan-400">N</span>
-                  <span className="absolute bottom-0 text-[8px] text-slate-500">S</span>
-                  <span className="absolute left-0 text-[8px] text-slate-500">W</span>
-                  <span className="absolute right-0 text-[8px] text-slate-500">E</span>
-                  <Compass className="w-4 h-4 text-slate-400 animate-spin" style={{ animationDuration: "30s" }} />
+                  {/* POI Markers */}
+                  <g transform="translate(790, 170)">
+                    <circle cx="10" cy="10" r="14" fill="#3b82f6" opacity="0.25" />
+                    <circle cx="10" cy="10" r="6" fill="#3b82f6" />
+                    <text x="24" y="14" fill="#93c5fd" fontSize="10" fontWeight="bold" fontFamily="monospace">
+                      POI-A: Water Sump
+                    </text>
+                  </g>
+
+                  <g transform="translate(630, 150)">
+                    <circle cx="10" cy="10" r="14" fill="#f59e0b" opacity="0.25" />
+                    <circle cx="10" cy="10" r="6" fill="#f59e0b" />
+                    <text x="24" y="14" fill="#fde68a" fontSize="10" fontWeight="bold" fontFamily="monospace">
+                      POI-B: 600V Vault
+                    </text>
+                  </g>
+
+                  {/* Drone Marker */}
+                  <g transform="translate(520, 220)">
+                    <circle cx="0" cy="0" r="32" fill="none" stroke="#10b981" strokeWidth="1" strokeDasharray="3,3" opacity="0.4" />
+                    <circle cx="0" cy="0" r="18" fill="none" stroke="#10b981" strokeWidth="1.5" opacity="0.7" />
+                    <circle cx="0" cy="0" r="6" fill="#10b981" />
+                    <rect x="12" y="-12" width="94" height="20" fill="#060c18" rx="4" stroke="#10b981" strokeWidth="1" />
+                    <text x="18" y="2" fill="#34d399" fontSize="9" fontWeight="bold" fontFamily="monospace">
+                      SCANNER-017
+                    </text>
+                  </g>
+                </svg>
+
+                {/* Compass Rose */}
+                <div className="absolute top-4 right-4 bg-slate-950/80 border border-slate-800 p-2 rounded-xl text-center backdrop-blur">
+                  <div className="w-8 h-8 relative flex items-center justify-center">
+                    <span className="absolute top-0 text-[9px] font-black text-cyan-400">N</span>
+                    <span className="absolute bottom-0 text-[8px] text-slate-500">S</span>
+                    <span className="absolute left-0 text-[8px] text-slate-500">W</span>
+                    <span className="absolute right-0 text-[8px] text-slate-500">E</span>
+                    <Compass className="w-4 h-4 text-slate-400 animate-spin" style={{ animationDuration: "30s" }} />
+                  </div>
+                </div>
+
+                {/* Bottom Legend */}
+                <div className="absolute bottom-3 left-3 bg-slate-950/85 border border-slate-800 p-2.5 rounded-xl backdrop-blur flex flex-wrap gap-3 text-[10px] text-slate-300">
+                  <div className="flex items-center space-x-1.5">
+                    <span className="w-3 h-0.5 bg-cyan-400" />
+                    <span>Flight Path</span>
+                  </div>
+                  <div className="flex items-center space-x-1.5">
+                    <span className="w-2.5 h-2.5 bg-red-500/40 border border-red-500 rounded-sm" />
+                    <span>Restricted Danger Area</span>
+                  </div>
+                  <div className="flex items-center space-x-1.5">
+                    <span className="w-2 h-2 rounded-full bg-blue-500" />
+                    <span>POI Station</span>
+                  </div>
+                  <div className="flex items-center space-x-1.5">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                    <span>Scanner Drone</span>
+                  </div>
                 </div>
               </div>
-
-              {/* Bottom-Left Legend Overlay */}
-              <div className="absolute bottom-3 left-3 bg-slate-950/85 border border-slate-800 p-2.5 rounded-xl backdrop-blur flex flex-wrap gap-3 text-[10px] text-slate-300">
-                <div className="flex items-center space-x-1.5">
-                  <span className="w-3 h-0.5 bg-cyan-400" />
-                  <span>Flight Path</span>
-                </div>
-                <div className="flex items-center space-x-1.5">
-                  <span className="w-2.5 h-2.5 bg-red-500/40 border border-red-500 rounded-sm" />
-                  <span>Restricted Danger Area</span>
-                </div>
-                <div className="flex items-center space-x-1.5">
-                  <span className="w-2 h-2 rounded-full bg-blue-500" />
-                  <span>POI Station</span>
-                </div>
-                <div className="flex items-center space-x-1.5">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400" />
-                  <span>Scanner Drone</span>
-                </div>
-              </div>
-            </div>
+            )}
 
             {/* Bottom Action Bar */}
             <div className="p-3 bg-slate-950 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-2">
@@ -765,13 +883,11 @@ export default function Home() {
 
           {/* BOTTOM SECTION: MISSION LOG & ANALYSIS */}
           <div className="p-4 rounded-2xl bg-slate-900/80 backdrop-blur-xl border border-slate-800/90 shadow-2xl space-y-3">
-            {/* Header, Search & Filter Pills */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800/80 pb-3">
               <h3 className="text-xs font-bold text-white uppercase tracking-wider">
                 Mission Log &amp; Analysis
               </h3>
 
-              {/* Search Bar */}
               <div className="flex items-center space-x-2">
                 <div className="relative">
                   <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
@@ -786,7 +902,6 @@ export default function Home() {
               </div>
             </div>
 
-            {/* Filter Pills */}
             <div className="flex items-center space-x-1.5 overflow-x-auto pb-1 scrollbar-none text-[11px]">
               {["All Logs", "Analysis", "Structural", "Moisture", "System"].map((filt) => (
                 <button
@@ -803,7 +918,6 @@ export default function Home() {
               ))}
             </div>
 
-            {/* Chronological Timeline List */}
             <div className="divide-y divide-slate-800/70">
               {filteredLogs.map((log, idx) => (
                 <div key={idx} className="py-2.5 flex items-center justify-between gap-3 hover:bg-slate-950/40 px-2 rounded-lg transition-colors">
@@ -952,7 +1066,7 @@ export default function Home() {
             </button>
           </div>
 
-          {/* Bottom Card: Live Feed • Live */}
+          {/* Bottom Card: Live Feed • Live (HTML5 Video & Real Webcam Streaming) */}
           <div className="p-4 rounded-2xl bg-slate-900/80 backdrop-blur-xl border border-slate-800/90 shadow-2xl space-y-3">
             <div className="flex items-center justify-between border-b border-slate-800 pb-2">
               <div className="flex items-center space-x-2">
@@ -965,48 +1079,102 @@ export default function Home() {
                 </span>
               </div>
               <button
-                onClick={() => alert("Optical Stream expanded to 4K resolution.")}
+                onClick={toggleRightWebcam}
                 className="text-[10px] text-cyan-400 hover:text-cyan-300 font-bold flex items-center space-x-1"
               >
-                <span>View Full Feed</span>
+                <span>{isRightWebcamActive ? "Stop Stream" : "Switch Source"}</span>
                 <ChevronRight className="w-3 h-3" />
               </button>
             </div>
 
-            {/* 16:9 Realistic Live Camera Stream Thumbnail */}
-            <div className="relative aspect-video rounded-xl bg-slate-950 overflow-hidden border border-slate-800 flex items-center justify-center">
-              {/* Procedural High-Rise Construction / Port Imagery */}
-              <svg className="w-full h-full" viewBox="0 0 320 180">
-                <defs>
-                  <linearGradient id="craneSky" x1="0%" y1="0%" x2="0%" y2="100%">
-                    <stop offset="0%" stopColor="#0c182c" />
-                    <stop offset="100%" stopColor="#050914" />
-                  </linearGradient>
-                </defs>
-                <rect width="320" height="180" fill="url(#craneSky)" />
-                {/* Foundation Trench Concrete Edge */}
-                <path d="M 0,110 L 120,95 L 220,105 L 320,85 L 320,180 L 0,180 Z" fill="#1e293b" />
-                <path d="M 0,120 L 140,110 L 260,125 L 320,105 L 320,180 L 0,180 Z" fill="#0f172a" />
-                {/* Construction Tower Crane Silhouette */}
-                <line x1="240" y1="20" x2="240" y2="120" stroke="#f59e0b" strokeWidth="2.5" />
-                <line x1="180" y1="20" x2="300" y2="20" stroke="#f59e0b" strokeWidth="2" />
-                <line x1="240" y1="20" x2="210" y2="50" stroke="#f59e0b" strokeWidth="1" />
-                <line x1="210" y1="20" x2="210" y2="70" stroke="#ef4444" strokeWidth="1" strokeDasharray="2,2" />
-                {/* Water Sump Reflection */}
-                <ellipse cx="140" cy="140" rx="60" ry="20" fill="#0284c7" opacity="0.3" />
-              </svg>
+            {/* 16:9 Real HTML5 Video Container & Real Webcam Feed */}
+            <div className="relative aspect-video rounded-xl bg-slate-950 overflow-hidden border border-slate-800 flex items-center justify-center group shadow-inner">
+              {/* HTML5 Live Video Element */}
+              <video
+                ref={rightVideoRef}
+                autoPlay
+                playsInline
+                muted
+                className={`w-full h-full object-cover ${!isRightWebcamActive ? "hidden" : "block"}`}
+              />
 
-              {/* Live Overlay Tag & Quality Badge */}
-              <div className="absolute top-2 left-2 bg-slate-950/80 text-[9px] text-cyan-300 px-2 py-0.5 rounded border border-cyan-800/60 font-mono">
-                Toronto Spadina Tower • Sub-Grade P2
+              {/* High-Resolution Construction Fallback Stream when Webcam Inactive */}
+              {!isRightWebcamActive && (
+                <div className="relative w-full h-full">
+                  <video
+                    autoPlay
+                    loop
+                    muted
+                    playsInline
+                    className="w-full h-full object-cover filter contrast-105"
+                    poster="https://images.unsplash.com/photo-1541888946425-d0fbb186156f?auto=format&fit=crop&w=800&q=80"
+                  >
+                    <source
+                      src="https://assets.mixkit.co/videos/preview/mixkit-construction-site-building-a-house-41381-large.mp4"
+                      type="video/mp4"
+                    />
+                  </video>
+                  {/* Subtle dark gradient overlay */}
+                  <div className="absolute inset-0 bg-slate-950/30 backdrop-blur-[0.5px]" />
+                </div>
+              )}
+
+              {/* Optical Targeting Crosshairs Overlay */}
+              <div className="absolute inset-0 pointer-events-none">
+                <div className="absolute top-2 left-2 w-4 h-4 border-t-2 border-l-2 border-cyan-400" />
+                <div className="absolute top-2 right-2 w-4 h-4 border-t-2 border-r-2 border-cyan-400" />
+                <div className="absolute bottom-2 left-2 w-4 h-4 border-b-2 border-l-2 border-cyan-400" />
+                <div className="absolute bottom-2 right-2 w-4 h-4 border-b-2 border-r-2 border-cyan-400" />
+                <div className="absolute inset-0 flex items-center justify-center opacity-40">
+                  <div className="w-16 h-16 border border-cyan-400/50 rounded-full" />
+                </div>
               </div>
-              <div className="absolute top-2 right-2 bg-slate-950/80 text-[9px] text-emerald-400 px-1.5 py-0.5 rounded border border-emerald-800 font-bold">
-                1080p
+
+              {/* Live Overlay Tags */}
+              <div className="absolute top-2 left-2 bg-slate-950/85 text-[9px] text-cyan-300 px-2 py-0.5 rounded border border-cyan-800/60 font-mono">
+                {isRightWebcamActive ? "🔴 LIVE WEBCAM (CAM-01)" : "CAM-01 • Sub-Grade P2"}
               </div>
-              <div className="absolute bottom-2 left-2 text-[9px] text-slate-400 font-mono">
-                01:34:16 EST
+              <div className="absolute top-2 right-2 bg-slate-950/85 text-[9px] text-emerald-400 px-1.5 py-0.5 rounded border border-emerald-800 font-bold">
+                1080p 60FPS
               </div>
+
+              {/* Center "Turn on Webcam" Prompt Pill when Webcam is Inactive */}
+              {!isRightWebcamActive && (
+                <button
+                  onClick={toggleRightWebcam}
+                  className="absolute inset-0 m-auto w-44 h-10 rounded-xl bg-cyan-500/95 hover:bg-cyan-400 text-slate-950 font-bold text-xs flex items-center justify-center space-x-2 shadow-2xl transition-all hover:scale-105 z-20"
+                >
+                  <Camera className="w-4 h-4" />
+                  <span>Turn on Live Webcam</span>
+                </button>
+              )}
+
+              {/* Snapshot and Stop Controls when Live Webcam is Active */}
+              {isRightWebcamActive && (
+                <div className="absolute bottom-2 left-2 right-2 flex items-center justify-between z-20">
+                  <button
+                    onClick={captureRightSnapshot}
+                    className="px-2.5 py-1 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-[10px] flex items-center space-x-1 shadow-lg transition-colors"
+                  >
+                    <Sparkles className="w-3 h-3" />
+                    <span>Capture Snapshot</span>
+                  </button>
+                  <button
+                    onClick={toggleRightWebcam}
+                    className="px-2 py-1 rounded-lg bg-red-600 hover:bg-red-500 text-white font-bold text-[10px] transition-colors shadow"
+                  >
+                    <span>Stop Camera</span>
+                  </button>
+                </div>
+              )}
             </div>
+
+            {/* Webcam Notice feedback */}
+            {webcamNotice && (
+              <div className="text-[10px] text-cyan-300 bg-slate-950 px-2 py-1 rounded border border-slate-800">
+                {webcamNotice}
+              </div>
+            )}
 
             {/* Mission Details Table */}
             <div className="space-y-1.5">
