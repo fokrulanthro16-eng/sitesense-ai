@@ -1,5 +1,5 @@
-import type { Metadata } from "next";
 import "./globals.css";
+import type { Metadata } from "next";
 
 export const metadata: Metadata = {
   title: "SiteSense AI 🍁 | Autonomous Spatial Inspection & Memory Agent",
@@ -17,7 +17,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className="dark">
-      <body className="min-h-screen bg-[#070b14] text-slate-100 antialiased selection:bg-cyan-500 selection:text-slate-950">
+      <body className="min-h-screen bg-[#060a12] text-slate-100 antialiased selection:bg-cyan-500 selection:text-slate-950">
         {children}
       </body>
     </html>

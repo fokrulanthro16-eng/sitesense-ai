@@ -2,19 +2,20 @@ import type { Config } from "tailwindcss";
 
 const config: Config = {
   content: [
+    "./app/**/*.{js,ts,jsx,tsx,mdx}",
     "./pages/**/*.{js,ts,jsx,tsx,mdx}",
     "./components/**/*.{js,ts,jsx,tsx,mdx}",
-    "./app/**/*.{js,ts,jsx,tsx,mdx}",
+    "./src/**/*.{js,ts,jsx,tsx,mdx}",
   ],
   theme: {
     extend: {
       colors: {
-        background: "#070b14",
+        background: "#060a12",
         foreground: "#f8fafc",
         cyber: {
-          dark: "#070b14",
-          card: "rgba(15, 23, 42, 0.7)",
-          border: "rgba(51, 65, 85, 0.8)",
+          dark: "#060a12",
+          card: "rgba(15, 23, 42, 0.8)",
+          border: "rgba(51, 65, 85, 0.9)",
           cyan: "#06b6d4",
           blue: "#3b82f6",
           emerald: "#10b981",
@@ -53,4 +54,5 @@ const config: Config = {
   },
   plugins: [],
 };
+
 export default config;
