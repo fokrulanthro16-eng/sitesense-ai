@@ -74,6 +74,16 @@ export default function Home() {
   const [currentRole, setCurrentRole] = useState<UserRole>("Lead Structural Inspector");
   const [isRoleDropdownOpen, setIsRoleDropdownOpen] = useState<boolean>(false);
 
+  // Autonomous Demo Pipeline Hook & URL Trigger
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      (window as any).__OPEN_DEMO_MODAL__ = () => setIsDemoModalOpen(true);
+      if (window.location.search.includes("autoDemo=1")) {
+        setIsDemoModalOpen(true);
+      }
+    }
+  }, []);
+
   // Active Inspection & Work-Order Data
   const [currentInspection, setCurrentInspection] = useState<InspectionResult>({
     zone: "Basement Foundation Wall - East Bay B-4",

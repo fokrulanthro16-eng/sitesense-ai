@@ -155,7 +155,13 @@ export const CinematicDemoModal: React.FC<CinematicDemoModalProps> = ({ isOpen, 
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
-  const [playbackSpeed, setPlaybackSpeed] = useState<number>(1);
+  const [playbackSpeed, setPlaybackSpeed] = useState<number>(() => {
+    if (typeof window !== "undefined") {
+      const match = window.location.search.match(/[?&]speed=([0-9.]+)/);
+      if (match && match[1]) return parseFloat(match[1]);
+    }
+    return 1;
+  });
   const [sceneProgress, setSceneProgress] = useState<number>(0);
   const [activeWordChar, setActiveWordChar] = useState<number>(0);
   const [isAutoPipelineRunning, setIsAutoPipelineRunning] = useState<boolean>(false);
@@ -284,6 +290,7 @@ export const CinematicDemoModal: React.FC<CinematicDemoModalProps> = ({ isOpen, 
     // Autonomous step transition on speech end
     utterance.onend = () => {
       if (progressTimerRef.current) clearInterval(progressTimerRef.current);
+      if (fallbackTimerRef.current) clearTimeout(fallbackTimerRef.current);
       setSceneProgress(100);
       setTimeout(() => {
         advanceNextStep();
@@ -292,10 +299,17 @@ export const CinematicDemoModal: React.FC<CinematicDemoModalProps> = ({ isOpen, 
 
     utterance.onerror = (err) => {
       console.warn("Speech synthesis error or interrupted, using fallback timer.", err);
+      if (fallbackTimerRef.current) clearTimeout(fallbackTimerRef.current);
       fallbackTimerRef.current = setTimeout(() => {
         advanceNextStep();
       }, fallbackDuration);
     };
+
+    // Watchdog fallback timer guarantees smooth progression in headless/quiet environments
+    fallbackTimerRef.current = setTimeout(() => {
+      console.log(`Watchdog timer advancing chapter from scene ${sceneIndex}`);
+      advanceNextStep();
+    }, fallbackDuration + 600);
 
     window.speechSynthesis.speak(utterance);
   };
@@ -412,6 +426,17 @@ export const CinematicDemoModal: React.FC<CinematicDemoModalProps> = ({ isOpen, 
         URL.revokeObjectURL(url);
         setIsRecording(false);
         setExportCompleteNotice("Presentation Video Exported & Downloaded Successfully! (SiteSense_AI_Demo_Presentation.webm)");
+
+        // Expose binary base64 on window for automated pipeline collection
+        if (typeof window !== "undefined") {
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            (window as any).__RECORDED_VIDEO_BASE64__ = reader.result;
+            (window as any).__RECORDED_VIDEO_SIZE__ = blob.size;
+            (window as any).__RECORDED_VIDEO_READY__ = true;
+          };
+          reader.readAsDataURL(blob);
+        }
       };
 
       mediaRecorder.start(200);
@@ -439,6 +464,17 @@ export const CinematicDemoModal: React.FC<CinematicDemoModalProps> = ({ isOpen, 
     setIsAutoPipelineRunning(false);
   };
 
+  // Expose automation hooks on window
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      (window as any).__START_DEMO_RECORDING__ = startAutomatedPresentationAndRecord;
+      (window as any).__STOP_DEMO_RECORDING__ = manualStopRecording;
+      (window as any).__DEMO_SCENE_INDEX__ = () => currentSceneIndexRef.current;
+      (window as any).__DEMO_IS_RECORDING__ = () => isRecording;
+      (window as any).__ADVANCE_DEMO_STEP__ = advanceNextStep;
+    }
+  }, [isOpen, isRecording]);
+
   // Start sequence when modal opens
   useEffect(() => {
     if (isOpen) {
@@ -447,6 +483,13 @@ export const CinematicDemoModal: React.FC<CinematicDemoModalProps> = ({ isOpen, 
       setIsPlaying(true);
       speakCurrentScene(0);
       playSciFiDroneSound(130);
+
+      // Auto-trigger recording if URL parameter autoRecord=1 is present
+      if (typeof window !== "undefined" && window.location.search.includes("autoRecord=1")) {
+        setTimeout(() => {
+          startAutomatedPresentationAndRecord();
+        }, 600);
+      }
     } else {
       setIsPlaying(false);
       if (typeof window !== "undefined" && "speechSynthesis" in window) {

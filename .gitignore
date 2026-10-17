@@ -36,3 +36,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# render frames & temporary media
+output/frames/
+output/frames_test/
+*.webm
+
