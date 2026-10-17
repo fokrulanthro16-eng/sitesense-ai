@@ -42,3 +42,5 @@ output/frames/
 output/frames_test/
 *.webm
 
+
+.vercel
