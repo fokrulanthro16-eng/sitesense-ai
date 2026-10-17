@@ -64,7 +64,7 @@ flowchart TD
 
     subgraph SpatialTemporalMemory["4. SurrealDB 2.0 Graph & Temporal Agent Memory"]
         SurrealGraph["SurrealDB Directed Graph Hierarchy<br/>building ➔ floor ➔ zone ➔ crack"]
-        TemporalDelta["Temporal Delta Vector<br/>(Baseline 0.05\" ➔ 0.45\" | +800% Widening)"]
+        TemporalDelta["Temporal Delta Vector<br/>(Baseline 0.05in to 0.45in | +800% Widening)"]
         ReactiveEvent["DEFINE EVENT critical_shear<br/>Auto-Dispatches Trade Subcontractor"]
     end
 
