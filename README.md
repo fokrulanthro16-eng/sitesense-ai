@@ -15,7 +15,7 @@
 Built for **Build North: Ship Something Real** Hackathon  
 Hosted by **Georgian, Anthropic, Google Cloud, Expo, Clerk, Era by Eon, and SurrealDB**
 
-[🎬 Watch 1080p YouTube Demo](https://youtu.be/dtHGeaRoemM) • [🏗️ View Architecture](#system-architecture) • [⚡ Sponsor Tracks](#deep-dive-sponsor-track-integrations) • [🚀 Quickstart](#local-setup--quickstart)
+[🌐 Live Web App](https://sitesense-ai-ten.vercel.app) • [🎬 Watch 1080p YouTube Demo](https://youtu.be/dtHGeaRoemM) • [🏗️ View Architecture](#system-architecture) • [⚡ Sponsor Tracks](#deep-dive-sponsor-track-integrations) • [🚀 Quickstart](#local-setup--quickstart)
 
 </div>
 

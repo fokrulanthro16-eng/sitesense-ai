@@ -2,6 +2,7 @@
 
 **Hackathon**: Build North: Ship Something Real  
 **Hosts**: Georgian, Anthropic, Google Cloud, Expo, Clerk, Era by Eon, and SurrealDB  
+**Live Web Application**: [https://sitesense-ai-ten.vercel.app](https://sitesense-ai-ten.vercel.app)  
 **Live Demo Video**: [https://youtu.be/dtHGeaRoemM](https://youtu.be/dtHGeaRoemM)  
 **Repository**: [https://github.com/fokrulanthro16-eng/sitesense-ai](https://github.com/fokrulanthro16-eng/sitesense-ai)
 
