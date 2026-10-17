@@ -49,7 +49,9 @@ import { WorkOrderPrintModal } from "@/components/WorkOrderPrintModal";
 import { PartnerStackModal, PartnerKey } from "@/components/PartnerStackModal";
 import { ExpoCompanionModal } from "@/components/ExpoCompanionModal";
 import { EonBenchmarkModal } from "@/components/EonBenchmarkModal";
+import { CinematicDemoModal } from "@/components/CinematicDemoModal";
 import { InspectionResult, UserRole } from "@/lib/types";
+import { Film } from "lucide-react";
 
 export default function Home() {
   // Navigation & Viewport State
@@ -66,6 +68,7 @@ export default function Home() {
   const [activePartnerModal, setActivePartnerModal] = useState<PartnerKey>(null);
   const [isExpoModalOpen, setIsExpoModalOpen] = useState<boolean>(false);
   const [isEonModalOpen, setIsEonModalOpen] = useState<boolean>(false);
+  const [isDemoModalOpen, setIsDemoModalOpen] = useState<boolean>(false);
 
   // Role State
   const [currentRole, setCurrentRole] = useState<UserRole>("Lead Structural Inspector");
@@ -312,6 +315,16 @@ export default function Home() {
 
           {/* Right Section: System Online, Notification, Profile */}
           <div className="flex items-center space-x-3">
+            {/* 4K Cinematic Demo Trigger Button */}
+            <button
+              onClick={() => setIsDemoModalOpen(true)}
+              className="flex items-center space-x-1.5 px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-cyan-500 via-indigo-500 to-purple-600 hover:from-cyan-400 hover:to-purple-500 text-slate-950 font-black text-xs transition-all shadow-[0_0_18px_rgba(6,182,212,0.45)] hover:scale-105 font-mono"
+              title="Watch Automated 4K Interactive Demo Pitch"
+            >
+              <Film className="w-3.5 h-3.5 text-slate-950" />
+              <span>🎬 4K AI Pitch Video</span>
+            </button>
+
             {/* System Online Badge */}
             <div className="flex items-center space-x-2 px-3 py-1.5 rounded-full bg-emerald-950/60 border border-emerald-800/50 text-emerald-400 text-xs font-mono">
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
@@ -397,6 +410,23 @@ export default function Home() {
             <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider px-2 block">
               MISSION CONTROL
             </span>
+
+            {/* 4K Cinematic Demo Launcher Card */}
+            <button
+              onClick={() => setIsDemoModalOpen(true)}
+              className="w-full flex items-center justify-between p-2.5 rounded-xl bg-gradient-to-r from-purple-950/60 to-cyan-950/60 border border-purple-700/60 hover:border-cyan-400 text-left transition-all group shadow-lg"
+            >
+              <div className="flex items-center space-x-2">
+                <div className="w-6 h-6 rounded-lg bg-gradient-to-tr from-cyan-500 to-purple-600 flex items-center justify-center text-slate-950 font-bold shadow">
+                  <Play className="w-3 h-3 fill-current ml-0.5" />
+                </div>
+                <div>
+                  <div className="text-[11px] font-bold text-white group-hover:text-cyan-300">4K Cinematic Demo</div>
+                  <div className="text-[9px] text-slate-400">Automated 6-Part Pitch</div>
+                </div>
+              </div>
+              <Sparkles className="w-3.5 h-3.5 text-cyan-400 animate-pulse" />
+            </button>
 
             <div className="space-y-1">
               {[
@@ -1251,6 +1281,11 @@ export default function Home() {
       <EonBenchmarkModal
         isOpen={isEonModalOpen}
         onClose={() => setIsEonModalOpen(false)}
+      />
+
+      <CinematicDemoModal
+        isOpen={isDemoModalOpen}
+        onClose={() => setIsDemoModalOpen(false)}
       />
     </div>
   );
