@@ -15,7 +15,12 @@
 Built for **Build North: Ship Something Real** Hackathon  
 Hosted by **Georgian, Anthropic, Google Cloud, Expo, Clerk, Era by Eon, and SurrealDB**
 
-[🌐 Live Web App](https://sitesense-ai-ten.vercel.app) • [🎬 Watch 1080p YouTube Demo](https://youtu.be/dtHGeaRoemM) • [🏗️ View Architecture](#system-architecture) • [⚡ Sponsor Tracks](#deep-dive-sponsor-track-integrations) • [🚀 Quickstart](#local-setup--quickstart)
+### 🔗 Official Project Links
+**🌐 Live Demo:** [https://sitesense-ai-ten.vercel.app](https://sitesense-ai-ten.vercel.app)  
+**🎬 1080p Video Demo:** [https://youtu.be/dtHGeaRoemM](https://youtu.be/dtHGeaRoemM)  
+**🐙 GitHub Repo:** [https://github.com/fokrulanthro16-eng/sitesense-ai](https://github.com/fokrulanthro16-eng/sitesense-ai)
+
+[🏗️ View Architecture](#system-architecture) • [⚡ Sponsor Tracks](#deep-dive-sponsor-track-integrations) • [🚀 Quickstart](#local-setup--quickstart)
 
 </div>
 
