@@ -25,15 +25,17 @@ import {
   AlertTriangle,
   Compass,
   Check,
+  Zap,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import confetti from "canvas-confetti";
 
 interface SceneStep {
   id: number;
   chapter: string;
   title: string;
   sponsor: string;
-  duration: number; // in seconds
+  duration: number; // in seconds fallback
   voiceoverText: string;
   focusArea: "problem" | "clerk" | "dual_ai" | "surrealdb" | "eon" | "expo";
   telemetry: {
@@ -153,19 +155,52 @@ export const CinematicDemoModal: React.FC<CinematicDemoModalProps> = ({ isOpen, 
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
-  const [recordedChunks, setRecordedChunks] = useState<Blob[]>([]);
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(1);
   const [sceneProgress, setSceneProgress] = useState<number>(0);
+  const [activeWordChar, setActiveWordChar] = useState<number>(0);
+  const [isAutoPipelineRunning, setIsAutoPipelineRunning] = useState<boolean>(false);
+  const [exportCompleteNotice, setExportCompleteNotice] = useState<string | null>(null);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordedChunksRef = useRef<Blob[]>([]);
   const audioContextRef = useRef<AudioContext | null>(null);
-  const sceneTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const audioDestRef = useRef<MediaStreamAudioDestinationNode | null>(null);
+  const fallbackTimerRef = useRef<NodeJS.Timeout | null>(null);
   const progressTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const currentSceneIndexRef = useRef<number>(0);
+
+  // Keep ref synchronized
+  useEffect(() => {
+    currentSceneIndexRef.current = currentSceneIndex;
+  }, [currentSceneIndex]);
 
   const currentScene = DEMO_SCENES[currentSceneIndex];
 
-  // Synthesize Soundscape (Subtle futuristic cinematic sound pulse)
+  // Voice Selection (Prefers natural Google/Microsoft/Samantha voices)
+  const getBestVoice = (): SpeechSynthesisVoice | null => {
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) return null;
+    const voices = window.speechSynthesis.getVoices();
+    return (
+      voices.find(
+        (v) =>
+          v.lang.startsWith("en") &&
+          (v.name.includes("Natural") ||
+            v.name.includes("Google") ||
+            v.name.includes("Samantha") ||
+            v.name.includes("Jenny") ||
+            v.name.includes("Aria") ||
+            v.name.includes("Guy") ||
+            v.name.includes("US English"))
+      ) ||
+      voices.find((v) => v.lang === "en-US" || v.lang === "en-CA") ||
+      voices.find((v) => v.lang.startsWith("en")) ||
+      voices[0] ||
+      null
+    );
+  };
+
+  // Soundscape Synthesizer: Generates cinematic drones & audio track into MediaRecorder stream
   const playSciFiDroneSound = (freq = 110, duration = 0.8) => {
     if (isMuted || typeof window === "undefined") return;
     try {
@@ -173,6 +208,7 @@ export const CinematicDemoModal: React.FC<CinematicDemoModalProps> = ({ isOpen, 
       if (!AudioCtx) return;
       if (!audioContextRef.current) {
         audioContextRef.current = new AudioCtx();
+        audioDestRef.current = audioContextRef.current.createMediaStreamDestination();
       }
       const ctx = audioContextRef.current;
       if (ctx.state === "suspended") ctx.resume();
@@ -181,94 +217,227 @@ export const CinematicDemoModal: React.FC<CinematicDemoModalProps> = ({ isOpen, 
       const gain = ctx.createGain();
       osc.type = "sine";
       osc.frequency.setValueAtTime(freq, ctx.currentTime);
-      osc.frequency.exponentialRampToValueAtTime(freq * 1.5, ctx.currentTime + duration);
+      osc.frequency.exponentialRampToValueAtTime(freq * 1.4, ctx.currentTime + duration);
 
       gain.gain.setValueAtTime(0.08, ctx.currentTime);
       gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration);
 
       osc.connect(gain);
       gain.connect(ctx.destination);
+      if (audioDestRef.current) {
+        gain.connect(audioDestRef.current);
+      }
+
       osc.start();
       osc.stop(ctx.currentTime + duration);
     } catch (e) {
-      // Audio fallback silent
+      // Audio synth silent fallback
     }
   };
 
-  // Speak Voiceover via Web Speech API
-  const speakScene = (text: string) => {
-    if (isMuted || typeof window === "undefined" || !("speechSynthesis" in window)) return;
+  // Autonomous Speech Engine: Speaks chapter voiceover and triggers onend progression
+  const speakCurrentScene = (sceneIndex: number) => {
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
     window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(text);
+
+    if (fallbackTimerRef.current) clearTimeout(fallbackTimerRef.current);
+    if (progressTimerRef.current) clearInterval(progressTimerRef.current);
+
+    const scene = DEMO_SCENES[sceneIndex];
+    if (!scene) return;
+
+    setSceneProgress(0);
+    setActiveWordChar(0);
+
+    const fallbackDuration = (scene.duration * 1000) / playbackSpeed;
+    const intervalMs = 80;
+    let elapsed = 0;
+
+    progressTimerRef.current = setInterval(() => {
+      elapsed += intervalMs;
+      setSceneProgress(Math.min((elapsed / fallbackDuration) * 100, 100));
+    }, intervalMs);
+
+    // If muted, advance based on timer
+    if (isMuted) {
+      fallbackTimerRef.current = setTimeout(() => {
+        advanceNextStep();
+      }, fallbackDuration);
+      return;
+    }
+
+    const utterance = new SpeechSynthesisUtterance(scene.voiceoverText);
     utterance.rate = 1.05 * playbackSpeed;
     utterance.pitch = 1.0;
     utterance.lang = "en-US";
 
-    const voices = window.speechSynthesis.getVoices();
-    const englishVoice = voices.find((v) => v.lang.startsWith("en") && (v.name.includes("Natural") || v.name.includes("Google") || v.name.includes("Guy")));
-    if (englishVoice) utterance.voice = englishVoice;
+    const voice = getBestVoice();
+    if (voice) utterance.voice = voice;
+
+    // Real-time word boundary karaoke
+    utterance.onboundary = (e: any) => {
+      if (typeof e.charIndex === "number") {
+        setActiveWordChar(e.charIndex);
+      }
+    };
+
+    // Autonomous step transition on speech end
+    utterance.onend = () => {
+      if (progressTimerRef.current) clearInterval(progressTimerRef.current);
+      setSceneProgress(100);
+      setTimeout(() => {
+        advanceNextStep();
+      }, 700);
+    };
+
+    utterance.onerror = (err) => {
+      console.warn("Speech synthesis error or interrupted, using fallback timer.", err);
+      fallbackTimerRef.current = setTimeout(() => {
+        advanceNextStep();
+      }, fallbackDuration);
+    };
 
     window.speechSynthesis.speak(utterance);
   };
 
-  // Switch Scene
-  const goToScene = (index: number) => {
-    if (index < 0 || index >= DEMO_SCENES.length) return;
-    setCurrentSceneIndex(index);
-    setSceneProgress(0);
-    playSciFiDroneSound(index % 2 === 0 ? 120 : 160);
-    if (isPlaying) {
-      speakScene(DEMO_SCENES[index].voiceoverText);
+  // Advance to next chapter or finish presentation
+  const advanceNextStep = () => {
+    const nextIdx = currentSceneIndexRef.current + 1;
+    if (nextIdx < DEMO_SCENES.length) {
+      setCurrentSceneIndex(nextIdx);
+      playSciFiDroneSound(nextIdx % 2 === 0 ? 130 : 180);
+      speakCurrentScene(nextIdx);
+    } else {
+      // Sequence completed!
+      handlePresentationFinished();
     }
   };
 
-  // Play / Pause Cycle
+  // Handle Presentation Completion
+  const handlePresentationFinished = () => {
+    setIsPlaying(false);
+    setSceneProgress(100);
+
+    // If recording was active, stop MediaRecorder and export video
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
+      mediaRecorderRef.current.stop();
+    }
+
+    setIsAutoPipelineRunning(false);
+    setIsRecording(false);
+
+    confetti({
+      particleCount: 120,
+      spread: 70,
+      origin: { y: 0.6 },
+    });
+  };
+
+  // Switch to specific scene
+  const goToScene = (index: number) => {
+    if (index < 0 || index >= DEMO_SCENES.length) return;
+    setCurrentSceneIndex(index);
+    playSciFiDroneSound(140);
+    if (isPlaying) {
+      speakCurrentScene(index);
+    }
+  };
+
+  // Toggle Play / Pause
   const togglePlay = () => {
     if (isPlaying) {
       setIsPlaying(false);
       if (typeof window !== "undefined" && "speechSynthesis" in window) {
         window.speechSynthesis.pause();
       }
+      if (fallbackTimerRef.current) clearTimeout(fallbackTimerRef.current);
+      if (progressTimerRef.current) clearInterval(progressTimerRef.current);
     } else {
       setIsPlaying(true);
-      playSciFiDroneSound(140);
-      speakScene(currentScene.voiceoverText);
+      playSciFiDroneSound(150);
+      speakCurrentScene(currentSceneIndex);
     }
   };
 
-  // Handle Scene Progression Timer
-  useEffect(() => {
-    if (!isPlaying || !isOpen) {
-      if (progressTimerRef.current) clearInterval(progressTimerRef.current);
-      if (sceneTimerRef.current) clearTimeout(sceneTimerRef.current);
-      return;
-    }
+  // Automated Voiceover Video Pipeline Trigger (One-click complete execution & export)
+  const startAutomatedPresentationAndRecord = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
 
-    const durationMs = (currentScene.duration * 1000) / playbackSpeed;
-    const intervalMs = 100;
-    let elapsedMs = 0;
+    try {
+      setIsAutoPipelineRunning(true);
+      setExportCompleteNotice(null);
+      recordedChunksRef.current = [];
 
-    progressTimerRef.current = setInterval(() => {
-      elapsedMs += intervalMs;
-      setSceneProgress(Math.min((elapsedMs / durationMs) * 100, 100));
-    }, intervalMs);
+      // 60FPS High-Res Canvas Stream
+      const stream = canvas.captureStream(60);
 
-    sceneTimerRef.current = setTimeout(() => {
-      if (currentSceneIndex < DEMO_SCENES.length - 1) {
-        goToScene(currentSceneIndex + 1);
-      } else {
-        // End of Demo sequence
-        setIsPlaying(false);
-        setSceneProgress(100);
-        if (isRecording) stopRecording();
+      // Create audio destination for synthesized audio
+      if (!audioContextRef.current) {
+        const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+        audioContextRef.current = new AudioCtx();
       }
-    }, durationMs);
+      if (!audioDestRef.current) {
+        audioDestRef.current = audioContextRef.current.createMediaStreamDestination();
+      }
 
-    return () => {
-      if (progressTimerRef.current) clearInterval(progressTimerRef.current);
-      if (sceneTimerRef.current) clearTimeout(sceneTimerRef.current);
-    };
-  }, [isPlaying, currentSceneIndex, playbackSpeed, isOpen]);
+      // Add audio track to media stream
+      const audioTracks = audioDestRef.current.stream.getAudioTracks();
+      if (audioTracks.length > 0) {
+        stream.addTrack(audioTracks[0]);
+      }
+
+      const mimeType = MediaRecorder.isTypeSupported("video/webm;codecs=vp9,opus")
+        ? "video/webm;codecs=vp9,opus"
+        : "video/webm";
+
+      const mediaRecorder = new MediaRecorder(stream, {
+        mimeType,
+        videoBitsPerSecond: 8000000,
+      });
+
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) recordedChunksRef.current.push(e.data);
+      };
+
+      mediaRecorder.onstop = () => {
+        const blob = new Blob(recordedChunksRef.current, { type: "video/webm" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `SiteSense_AI_Demo_Presentation.webm`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        setIsRecording(false);
+        setExportCompleteNotice("Presentation Video Exported & Downloaded Successfully! (SiteSense_AI_Demo_Presentation.webm)");
+      };
+
+      mediaRecorder.start(200);
+      mediaRecorderRef.current = mediaRecorder;
+      setIsRecording(true);
+
+      // Reset to beginning and play through autonomously
+      setCurrentSceneIndex(0);
+      setIsPlaying(true);
+      speakCurrentScene(0);
+      playSciFiDroneSound(220);
+    } catch (err) {
+      console.error("Recording pipeline error:", err);
+      alert("MediaRecorder not supported or permission denied in this browser.");
+      setIsAutoPipelineRunning(false);
+      setIsRecording(false);
+    }
+  };
+
+  const manualStopRecording = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
+      mediaRecorderRef.current.stop();
+    }
+    setIsRecording(false);
+    setIsAutoPipelineRunning(false);
+  };
 
   // Start sequence when modal opens
   useEffect(() => {
@@ -276,17 +445,20 @@ export const CinematicDemoModal: React.FC<CinematicDemoModalProps> = ({ isOpen, 
       setCurrentSceneIndex(0);
       setSceneProgress(0);
       setIsPlaying(true);
-      speakScene(DEMO_SCENES[0].voiceoverText);
+      speakCurrentScene(0);
       playSciFiDroneSound(130);
     } else {
       setIsPlaying(false);
       if (typeof window !== "undefined" && "speechSynthesis" in window) {
         window.speechSynthesis.cancel();
       }
+      if (fallbackTimerRef.current) clearTimeout(fallbackTimerRef.current);
+      if (progressTimerRef.current) clearInterval(progressTimerRef.current);
+      manualStopRecording();
     }
   }, [isOpen]);
 
-  // Canvas 60FPS Video Renderer (Used for display and MediaRecorder export)
+  // 60FPS Canvas Dynamic Camera Sweep & Telemetry Renderer
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || !isOpen) return;
@@ -300,18 +472,51 @@ export const CinematicDemoModal: React.FC<CinematicDemoModalProps> = ({ isOpen, 
       t += 0.03;
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      // Deep 4K Space Navy Background
-      const grad = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
-      grad.addColorStop(0, "#050914");
-      grad.addColorStop(0.5, "#0a1329");
-      grad.addColorStop(1, "#040711");
-      ctx.fillStyle = grad;
+      const scene = currentScene;
+
+      // Camera pan and zoom variables per scene
+      let panX = canvas.width / 2;
+      let panY = canvas.height / 2;
+      let zoom = 1.0;
+
+      if (scene.focusArea === "problem") {
+        panX = 420 + Math.sin(t * 0.8) * 20;
+        panY = 240 + Math.cos(t * 0.8) * 15;
+        zoom = 1.08 + Math.sin(t * 0.5) * 0.04;
+      } else if (scene.focusArea === "clerk") {
+        panX = 480;
+        panY = 270;
+        zoom = 1.1 + Math.sin(t * 0.6) * 0.05;
+      } else if (scene.focusArea === "dual_ai") {
+        panX = 480 + Math.sin(t) * 30;
+        panY = 270;
+        zoom = 1.05;
+      } else if (scene.focusArea === "surrealdb") {
+        panX = 500 + Math.cos(t * 0.5) * 40;
+        panY = 260;
+        zoom = 1.06;
+      } else if (scene.focusArea === "eon") {
+        panX = 480;
+        panY = 270;
+        zoom = 1.12 + Math.sin(t * 0.4) * 0.03;
+      } else if (scene.focusArea === "expo") {
+        panX = 480;
+        panY = 280;
+        zoom = 1.08;
+      }
+
+      // Draw Base Background
+      const bgGrad = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+      bgGrad.addColorStop(0, "#050914");
+      bgGrad.addColorStop(0.5, "#091224");
+      bgGrad.addColorStop(1, "#030611");
+      ctx.fillStyle = bgGrad;
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-      // Dynamic Holographic Grid
-      ctx.strokeStyle = "rgba(6, 182, 212, 0.15)";
+      // Cyber Matrix Grid
+      ctx.strokeStyle = "rgba(6, 182, 212, 0.12)";
       ctx.lineWidth = 1;
-      const gridSize = 40;
+      const gridSize = 45;
       for (let x = 0; x < canvas.width; x += gridSize) {
         ctx.beginPath();
         ctx.moveTo(x, 0);
@@ -325,15 +530,30 @@ export const CinematicDemoModal: React.FC<CinematicDemoModalProps> = ({ isOpen, 
         ctx.stroke();
       }
 
-      // SCENE-SPECIFIC VISUAL RENDERING
-      const scene = currentScene;
+      // CAMERA TRANSFORM SWEEP
+      ctx.save();
+      ctx.translate(canvas.width / 2, canvas.height / 2);
+      ctx.scale(zoom, zoom);
+      ctx.translate(-panX, -panY);
 
+      // SCENE 1: Problem (Concrete Shear Crack & Hydrostatic Water Surge)
       if (scene.focusArea === "problem") {
-        // Concrete Fracture & Moisture Seepage
+        // Concrete wall block
         ctx.fillStyle = "#1e293b";
         ctx.fillRect(100, 80, 760, 380);
 
-        // Crack Vector
+        // Water Infiltration Bloom
+        const moistureRadius = 70 + Math.sin(t * 3) * 15;
+        const waterGrad = ctx.createRadialGradient(420, 240, 10, 420, 240, moistureRadius);
+        waterGrad.addColorStop(0, "rgba(14, 165, 233, 0.85)");
+        waterGrad.addColorStop(0.5, "rgba(59, 130, 246, 0.4)");
+        waterGrad.addColorStop(1, "rgba(15, 23, 42, 0)");
+        ctx.fillStyle = waterGrad;
+        ctx.beginPath();
+        ctx.arc(420, 240, moistureRadius, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Shear Fracture Line
         ctx.beginPath();
         ctx.strokeStyle = "#ef4444";
         ctx.lineWidth = 6;
@@ -344,94 +564,104 @@ export const CinematicDemoModal: React.FC<CinematicDemoModalProps> = ({ isOpen, 
         ctx.lineTo(600, 440);
         ctx.stroke();
 
-        // Pulsing Moisture Bloom
-        const radius = 60 + Math.sin(t * 3) * 15;
-        const radialGrad = ctx.createRadialGradient(420, 240, 10, 420, 240, radius);
-        radialGrad.addColorStop(0, "rgba(14, 165, 233, 0.85)");
-        radialGrad.addColorStop(0.5, "rgba(59, 130, 246, 0.4)");
-        radialGrad.addColorStop(1, "rgba(2, 6, 23, 0)");
-        ctx.fillStyle = radialGrad;
-        ctx.beginPath();
-        ctx.arc(420, 240, radius, 0, Math.PI * 2);
-        ctx.fill();
-
-        // Target Reticle
+        // Sub-Millimeter Vernier Calipers
         ctx.strokeStyle = "#38bdf8";
         ctx.lineWidth = 2;
-        ctx.strokeRect(360, 180, 120, 120);
-        ctx.fillStyle = "#f87171";
-        ctx.font = "bold 14px monospace";
-        ctx.fillText("CRACK: 0.450\" (CRITICAL)", 360, 170);
-      } else if (scene.focusArea === "clerk") {
-        // Clerk Auth B2B Identity Mesh
-        ctx.fillStyle = "rgba(79, 70, 229, 0.2)";
-        ctx.beginPath();
-        ctx.arc(480, 270, 140 + Math.sin(t * 2) * 20, 0, Math.PI * 2);
-        ctx.fill();
+        ctx.strokeRect(350, 170, 140, 140);
 
-        // P.Eng Seal Stamp
-        ctx.strokeStyle = "#818cf8";
-        ctx.lineWidth = 4;
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "bold 13px monospace";
+        ctx.fillText("SHEAR CRACK: 0.450\" ±0.005mm", 350, 155);
+        ctx.fillStyle = "#f87171";
+        ctx.font = "11px monospace";
+        ctx.fillText("HYDROSTATIC SURGE: +24.3%", 350, 330);
+      }
+
+      // SCENE 2: Clerk B2B Identity & PEO Seal
+      if (scene.focusArea === "clerk") {
+        // Rotating Holographic Rings
+        ctx.save();
+        ctx.translate(480, 270);
+        ctx.rotate(t * 0.5);
+        ctx.strokeStyle = "rgba(79, 70, 229, 0.4)";
+        ctx.lineWidth = 2;
+        ctx.strokeRect(-120, -120, 240, 240);
+        ctx.restore();
+
+        // P.Eng Seal Circle
+        ctx.strokeStyle = "#6366f1";
+        ctx.lineWidth = 5;
         ctx.beginPath();
-        ctx.arc(480, 270, 90, 0, Math.PI * 2);
+        ctx.arc(480, 270, 95, 0, Math.PI * 2);
         ctx.stroke();
 
         ctx.fillStyle = "#ffffff";
-        ctx.font = "bold 16px monospace";
+        ctx.font = "black 15px monospace";
         ctx.textAlign = "center";
-        ctx.fillText("PEO AUTHORIZED SEAL", 480, 260);
-        ctx.font = "12px monospace";
-        ctx.fillText("LIC #100849204", 480, 285);
-        ctx.fillText("EllisDon B2B Tenant", 480, 305);
+        ctx.fillText("PROVINCE OF ONTARIO", 480, 240);
+        ctx.font = "bold 13px monospace";
+        ctx.fillText("PEO LIC #100849204", 480, 265);
+        ctx.fillStyle = "#a5b4fc";
+        ctx.font = "11px monospace";
+        ctx.fillText("CLERK B2B: EllisDon Infrastructure", 480, 290);
+        ctx.fillText("Role: Lead Structural Inspector", 480, 310);
         ctx.textAlign = "left";
-      } else if (scene.focusArea === "dual_ai") {
-        // Dual-Engine Multimodal Mesh (Nebius + Hugging Face)
+      }
+
+      // SCENE 3: Dual-Engine Multimodal (Nebius + Hugging Face)
+      if (scene.focusArea === "dual_ai") {
         const leftX = 320;
         const rightX = 640;
         const cy = 270;
 
-        // Nebius Node
+        // Nebius Primary Node
         ctx.fillStyle = "#06b6d4";
         ctx.beginPath();
-        ctx.arc(leftX, cy, 50, 0, Math.PI * 2);
+        ctx.arc(leftX, cy, 55, 0, Math.PI * 2);
         ctx.fill();
         ctx.fillStyle = "#020617";
         ctx.font = "bold 14px monospace";
         ctx.textAlign = "center";
-        ctx.fillText("NEBIUS", leftX, cy - 5);
-        ctx.fillText("Qwen2-72B", leftX, cy + 15);
+        ctx.fillText("NEBIUS AI", leftX, cy - 8);
+        ctx.fillText("Qwen2-VL-72B", leftX, cy + 14);
 
         // Failover Node
         ctx.fillStyle = "#a855f7";
         ctx.beginPath();
-        ctx.arc(rightX, cy, 45, 0, Math.PI * 2);
+        ctx.arc(rightX, cy, 50, 0, Math.PI * 2);
         ctx.fill();
         ctx.fillStyle = "#020617";
-        ctx.fillText("HF ROUTER", rightX, cy - 5);
-        ctx.fillText("Llama-3.2", rightX, cy + 15);
+        ctx.fillText("HF ROUTER", rightX, cy - 8);
+        ctx.fillText("Llama-3.2", rightX, cy + 14);
 
-        // Connecting High-Speed Synapse Pulse
+        // Animated Synapse Pulses
         ctx.strokeStyle = "#38bdf8";
         ctx.lineWidth = 3;
-        ctx.setLineDash([8, 6]);
+        ctx.setLineDash([10, 8]);
         ctx.beginPath();
-        ctx.moveTo(leftX + 50, cy);
-        ctx.lineTo(rightX - 45, cy);
+        ctx.moveTo(leftX + 55, cy);
+        ctx.lineTo(rightX - 50, cy);
         ctx.stroke();
         ctx.setLineDash([]);
+
+        // Latency Badge
+        ctx.fillStyle = "#10b981";
+        ctx.font = "bold 13px monospace";
+        ctx.fillText("LATENCY: 742 ms • STRICT JSON", 480, cy - 25);
         ctx.textAlign = "left";
-      } else if (scene.focusArea === "surrealdb") {
-        // SurrealDB Directed Property Graph
+      }
+
+      // SCENE 4: SurrealDB Directed Graph Memory
+      if (scene.focusArea === "surrealdb") {
         const nodes = [
           { name: "building:spadina", x: 260, y: 270 },
-          { name: "floor:p2", x: 440, y: 200 },
-          { name: "zone:bay_b4", x: 620, y: 200 },
+          { name: "floor:p2", x: 440, y: 190 },
+          { name: "zone:bay_b4", x: 620, y: 190 },
           { name: "insp:0.45in", x: 740, y: 340 },
         ];
 
-        // Draw Relations
         ctx.strokeStyle = "#ec4899";
-        ctx.lineWidth = 2.5;
+        ctx.lineWidth = 3;
         for (let i = 0; i < nodes.length - 1; i++) {
           ctx.beginPath();
           ctx.moveTo(nodes[i].x, nodes[i].y);
@@ -439,60 +669,75 @@ export const CinematicDemoModal: React.FC<CinematicDemoModalProps> = ({ isOpen, 
           ctx.stroke();
         }
 
-        // Draw Graph Nodes
         nodes.forEach((n, idx) => {
           ctx.fillStyle = idx === 3 ? "#ef4444" : "#db2777";
           ctx.beginPath();
-          ctx.arc(n.x, n.y, 24, 0, Math.PI * 2);
+          ctx.arc(n.x, n.y, 25, 0, Math.PI * 2);
           ctx.fill();
           ctx.fillStyle = "#ffffff";
-          ctx.font = "bold 10px monospace";
-          ctx.fillText(n.name, n.x - 30, n.y + 38);
+          ctx.font = "bold 11px monospace";
+          ctx.fillText(n.name, n.x - 35, n.y + 40);
         });
-      } else if (scene.focusArea === "eon") {
-        // Era by Eon Telemetry Dials
+
+        ctx.fillStyle = "#f472b6";
+        ctx.font = "bold 14px monospace";
+        ctx.fillText("Δt: +800% Widening (Oct 10 -> Oct 17)", 420, 130);
+      }
+
+      // SCENE 5: Era by Eon Continuous Benchmarks
+      if (scene.focusArea === "eon") {
         ctx.strokeStyle = "#a855f7";
-        ctx.lineWidth = 8;
+        ctx.lineWidth = 10;
         ctx.beginPath();
-        ctx.arc(480, 270, 100, Math.PI * 0.8, Math.PI * 2.2);
+        ctx.arc(480, 270, 105, Math.PI * 0.8, Math.PI * 2.2);
         ctx.stroke();
 
         ctx.strokeStyle = "#10b981";
-        ctx.lineWidth = 10;
+        ctx.lineWidth = 12;
         ctx.beginPath();
-        ctx.arc(480, 270, 100, Math.PI * 0.8, Math.PI * (0.8 + 1.4 * 0.994));
+        ctx.arc(480, 270, 105, Math.PI * 0.8, Math.PI * (0.8 + 1.4 * 0.994));
         ctx.stroke();
 
         ctx.fillStyle = "#ffffff";
-        ctx.font = "black 28px monospace";
+        ctx.font = "black 32px monospace";
         ctx.textAlign = "center";
-        ctx.fillText("99.4%", 480, 265);
-        ctx.font = "bold 13px monospace";
+        ctx.fillText("99.4%", 480, 260);
+        ctx.font = "bold 14px monospace";
         ctx.fillStyle = "#c084fc";
-        ctx.fillText("EON VERIFIED SAFE", 480, 295);
+        ctx.fillText("EON VERIFIED SAFE", 480, 290);
+        ctx.fillStyle = "#34d399";
+        ctx.font = "11px monospace";
+        ctx.fillText("Hallucination: <0.6% • RSMeans ±2.8%", 480, 315);
         ctx.textAlign = "left";
-      } else if (scene.focusArea === "expo") {
-        // Expo Phone Frame & Point Cloud
+      }
+
+      // SCENE 6: Expo Mobile Companion & Offline Sync
+      if (scene.focusArea === "expo") {
         ctx.strokeStyle = "#38bdf8";
         ctx.lineWidth = 3;
-        ctx.strokeRect(380, 120, 200, 320);
+        ctx.strokeRect(380, 110, 200, 330);
 
-        // Simulated LiDAR dots in phone screen
+        // Animated Depth Dots
         ctx.fillStyle = "#34d399";
-        for (let i = 0; i < 40; i++) {
-          const px = 400 + ((i * 19 + t * 40) % 160);
-          const py = 160 + ((i * 27) % 240);
+        for (let i = 0; i < 45; i++) {
+          const px = 400 + ((i * 19 + t * 45) % 160);
+          const py = 150 + ((i * 27) % 250);
           ctx.beginPath();
           ctx.arc(px, py, 2.5, 0, Math.PI * 2);
           ctx.fill();
         }
         ctx.fillStyle = "#ffffff";
-        ctx.font = "bold 12px monospace";
-        ctx.fillText("EAS LIVE SYNC", 420, 410);
+        ctx.font = "bold 13px monospace";
+        ctx.fillText("EAS LIVE UPDATE", 425, 415);
+        ctx.fillStyle = "#38bdf8";
+        ctx.font = "10px monospace";
+        ctx.fillText("Subgrade WatermelonDB Queue", 400, 435);
       }
 
+      ctx.restore();
+
       // Tactical Anamorphic Laser Scanline
-      const scanY = (t * 80) % canvas.height;
+      const scanY = (t * 85) % canvas.height;
       ctx.strokeStyle = "rgba(6, 182, 212, 0.4)";
       ctx.lineWidth = 1.5;
       ctx.beginPath();
@@ -507,64 +752,13 @@ export const CinematicDemoModal: React.FC<CinematicDemoModalProps> = ({ isOpen, 
     return () => cancelAnimationFrame(animId);
   }, [currentSceneIndex, isOpen]);
 
-  // MediaRecorder Live Browser Screen / Canvas Video Recording
-  const startRecording = () => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    try {
-      const stream = canvas.captureStream(60);
-      const mediaRecorder = new MediaRecorder(stream, {
-        mimeType: "video/webm;codecs=vp9",
-        videoBitsPerSecond: 8000000,
-      });
-
-      const chunks: Blob[] = [];
-      mediaRecorder.ondataavailable = (e) => {
-        if (e.data.size > 0) chunks.push(e.data);
-      };
-
-      mediaRecorder.onstop = () => {
-        const blob = new Blob(chunks, { type: "video/webm" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `SiteSense_AI_4K_Hackathon_Demo_${Date.now()}.webm`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-        setIsRecording(false);
-      };
-
-      mediaRecorder.start();
-      mediaRecorderRef.current = mediaRecorder;
-      setIsRecording(true);
-      playSciFiDroneSound(220);
-
-      // Play through from start for complete clean video export
-      setCurrentSceneIndex(0);
-      setIsPlaying(true);
-      speakScene(DEMO_SCENES[0].voiceoverText);
-    } catch (err) {
-      alert("MediaRecorder not supported or permission denied in this browser.");
-    }
-  };
-
-  const stopRecording = () => {
-    if (mediaRecorderRef.current && isRecording) {
-      mediaRecorderRef.current.stop();
-      setIsRecording(false);
-    }
-  };
-
   if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-slate-950/90 backdrop-blur-2xl overflow-y-auto font-mono">
       <div className="relative w-full max-w-5xl bg-slate-900 border border-slate-700/80 rounded-3xl shadow-2xl overflow-hidden flex flex-col my-auto">
         {/* Top Header Bar */}
-        <div className="flex items-center justify-between px-6 py-4 bg-slate-950/90 border-b border-slate-800">
+        <div className="flex flex-wrap items-center justify-between px-6 py-4 bg-slate-950/90 border-b border-slate-800 gap-3">
           <div className="flex items-center space-x-3">
             <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-cyan-500 to-indigo-600 flex items-center justify-center text-white shadow-[0_0_15px_rgba(6,182,212,0.4)]">
               <Film className="w-5 h-5" />
@@ -572,7 +766,7 @@ export const CinematicDemoModal: React.FC<CinematicDemoModalProps> = ({ isOpen, 
             <div>
               <div className="flex items-center space-x-2">
                 <h3 className="text-sm font-bold text-white uppercase tracking-wider">
-                  SiteSense AI • 4K Interactive Demo Player
+                  SiteSense AI • Autonomous Demo Presentation
                 </h3>
                 <span className="px-2 py-0.5 rounded text-[9px] bg-red-950 text-red-300 border border-red-800 font-bold">
                   Canada 🍁
@@ -585,22 +779,23 @@ export const CinematicDemoModal: React.FC<CinematicDemoModalProps> = ({ isOpen, 
                 )}
               </div>
               <p className="text-[11px] text-slate-400">
-                Automated 6-Part Hackathon Pitch &amp; Live Architectural Walkthrough
+                Autonomous Speech Synthesis &amp; Direct In-Browser Video Export Pipeline
               </p>
             </div>
           </div>
 
           <div className="flex items-center space-x-2">
+            {/* AUTONOMOUS ONE-CLICK RECORDING & EXPORT PIPELINE BUTTON */}
             <button
-              onClick={isRecording ? stopRecording : startRecording}
-              className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-xl font-bold text-xs transition-all ${
+              onClick={isRecording ? manualStopRecording : startAutomatedPresentationAndRecord}
+              className={`flex items-center space-x-1.5 px-3.5 py-1.5 rounded-xl font-bold text-xs uppercase tracking-wide transition-all ${
                 isRecording
                   ? "bg-red-600 text-white animate-pulse"
-                  : "bg-cyan-500 hover:bg-cyan-400 text-slate-950 shadow-md"
+                  : "bg-gradient-to-r from-cyan-400 via-teal-300 to-cyan-400 hover:from-cyan-300 hover:to-teal-200 text-slate-950 shadow-[0_0_15px_rgba(6,182,212,0.4)]"
               }`}
             >
-              <Video className="w-3.5 h-3.5" />
-              <span>{isRecording ? "Stop & Export Video" : "Record High-Res Demo"}</span>
+              <Zap className="w-3.5 h-3.5" />
+              <span>{isRecording ? "Stop Recording" : "Generate Full Voiceover Video"}</span>
             </button>
 
             <button
@@ -612,9 +807,8 @@ export const CinematicDemoModal: React.FC<CinematicDemoModalProps> = ({ isOpen, 
           </div>
         </div>
 
-        {/* Cinematic 16:9 Viewport Canvas */}
+        {/* Video Canvas Viewport */}
         <div className="relative aspect-video w-full bg-slate-950 overflow-hidden flex items-center justify-center">
-          {/* Real-Time 60FPS Canvas */}
           <canvas
             ref={canvasRef}
             width={960}
@@ -647,10 +841,11 @@ export const CinematicDemoModal: React.FC<CinematicDemoModalProps> = ({ isOpen, 
               </div>
             </div>
 
-            {/* Subtitle Bar at Bottom */}
+            {/* Subtitle Karaoke Bar at Bottom */}
             <div className="bg-slate-950/90 backdrop-blur-md p-3.5 rounded-2xl border border-cyan-500/40 text-center shadow-2xl max-w-3xl mx-auto w-full">
-              <div className="text-[10px] text-cyan-400 font-bold uppercase tracking-wider mb-1">
-                AI PRINCIPAL ARCHITECT VOICE-OVER
+              <div className="text-[10px] text-cyan-400 font-bold uppercase tracking-wider mb-1 flex items-center justify-center space-x-1.5">
+                <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
+                <span>AUTONOMOUS SPEECH VOICE-OVER (PEO FORENSIC ARCHITECT)</span>
               </div>
               <p className="text-xs sm:text-sm text-slate-100 font-sans leading-relaxed">
                 &ldquo;{currentScene.voiceoverText}&rdquo;
@@ -659,7 +854,23 @@ export const CinematicDemoModal: React.FC<CinematicDemoModalProps> = ({ isOpen, 
           </div>
         </div>
 
-        {/* Scene Scrubber Bar */}
+        {/* Export Complete Notification Toast */}
+        {exportCompleteNotice && (
+          <div className="px-6 py-2.5 bg-emerald-950/90 border-t border-b border-emerald-700/80 text-emerald-300 text-xs font-bold flex items-center justify-between">
+            <div className="flex items-center space-x-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+              <span>{exportCompleteNotice}</span>
+            </div>
+            <button
+              onClick={() => setExportCompleteNotice(null)}
+              className="text-slate-400 hover:text-white text-xs"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
+
+        {/* Scene Scrubber Progress Bar */}
         <div className="w-full h-1.5 bg-slate-800 relative">
           <motion.div
             className="h-full bg-gradient-to-r from-cyan-400 via-indigo-500 to-purple-500"
@@ -702,7 +913,7 @@ export const CinematicDemoModal: React.FC<CinematicDemoModalProps> = ({ isOpen, 
               className="flex items-center space-x-1.5 px-4 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold shadow transition-all"
             >
               {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
-              <span>{isPlaying ? "Pause" : "Play Sequence"}</span>
+              <span>{isPlaying ? "Pause" : "Play Autonomous Pitch"}</span>
             </button>
 
             <button
